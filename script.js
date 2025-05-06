@@ -1,226 +1,137 @@
-function initMap() {
-    var step = steps[currentStep]; // Текущий шаг
-    if (map) {
-        map.remove();
-        map = null;
+document.addEventListener('DOMContentLoaded', () => {
+    let userLat = null;
+    let userLng = null;
+
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371e3;
+        const toRad = x => x * Math.PI / 180;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+            Math.sin(dLon / 2) ** 2;
+        return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
     }
 
-    map = L.map('map').setView([step.lat, step.lng], 15);  // Устанавливаем начальную позицию карты
+    function checkDistance() {
+        const form = document.getElementById('answer-form');
+        const message = document.getElementById('geo-message');
+        if (!form || !message || userLat === null || userLng === null) return;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap'
-    }).addTo(map);
+        const dist = getDistance(userLat, userLng, checkpointLat, checkpointLng);
 
-    // Маркер для пользователя
-    var carIcon = L.icon({
-        iconUrl: '{{ "assets/car.png"|theme }}',  // Вы можете указать свой иконку
-        iconSize: [40, 40],
-        iconAnchor: [20, 40]
-    });
-    userMarker = L.marker([step.lat, step.lng], { icon: carIcon }).addTo(map);
-
-    // Маркер для цели
-    var finishIcon = L.icon({
-        iconUrl: '{{ "assets/finish.png"|theme }}',  // Аналогично, для цели
-        iconSize: [40, 40],
-        iconAnchor: [20, 40]
-    });
-    destMarker = L.marker([step.lat, step.lng], { icon: finishIcon }).addTo(map);
-
-    firstPositionReceived = false;  // Сбрасываем флаг для первого получения позиции
-    if (routeLine) {
-        routeLine.remove();
-        routeLine = null;
-    }
-}
-
-///
-
-
-///
-
-
-function updateRoadRoute(lat, lng) {
-    var dest = steps[currentStep];  // Цель для текущего шага
-    var url = [
-        'https://router.project-osrm.org/route/v1/driving/',
-        lng, ',', lat, ';',  // Текущая позиция
-        dest.lng, ',', dest.lat, // Конечная точка
-        '?overview=full&geometries=geojson'
-    ].join('');
-
-    fetch(url)
-        .then(res => res.json())
-        .then(data => {
-            if (!data.routes || !data.routes.length) return;
-
-// Убираем старую линию
-            if (routeLine) {
-                map.removeLayer(routeLine);
-            }
-
-// Строим новый маршрут
-            var coords = data.routes[0].geometry.coordinates.map(pt => [pt[1], pt[0]]);
-            routeLine = L.polyline(coords, {
-                color: 'blue',
-                weight: 5,
-                opacity: 0.7
-            }).addTo(map);
-
-// Центрируем карту по маршруту
-            map.fitBounds(routeLine.getBounds(), {
-                padding: [50, 50]
-            });
-        })
-        .catch(err => console.error('OSRM route error', err));
-}
-
-
-///
-
-
-function startTracking() {
-    if (!navigator.geolocation) {
-        alert('Геолокация не поддерживается');
-        return;
-    }
-
-    geoWatchId = navigator.geolocation.watchPosition(onPositionSuccess, showError, {
-        enableHighAccuracy: true,
-        maximumAge: 10000,
-        timeout: 10000
-    });
-}
-
-function stopTracking() {
-    if (geoWatchId !== null) {
-        navigator.geolocation.clearWatch(geoWatchId);
-        geoWatchId = null;
-    }
-}
-
-function onPositionSuccess(position) {
-    var lat = position.coords.latitude;
-    var lng = position.coords.longitude;
-
-// Обновление координат пользователя на карте
-    if (userMarker) {
-        userMarker.setLatLng([lat, lng]);
-    }
-
-    updateRoadRoute(lat, lng);  // Обновление маршрута
-
-// Расчёт дистанции до цели
-    var step = steps[currentStep];
-    var dist = getDistance(lat, lng, step.lat, step.lng);
-    var text = dist < 1000
-        ? Math.round(dist) + ' м'
-        : (dist / 1000).toFixed(1) + ' км';
-    $('#distance-info').text('🚗 До цели: ' + text);
-
-// Проверка, достиг ли пользователь цели
-    var radius = step.radius || 100;
-    if (dist <= radius) {
-        stopTracking();
-        $('#map, #open-in-maps, #distance-info').fadeOut(400);
-        $('#step-block').fadeIn(400, function () {
-            $('#submit-button').prop('disabled', false);  // Разрешить ответ
-        });
-        startTimer(step.min_time_spent || 0);
-    }
-}
-
-
-///
-
-function restoreStep() {
-    if (currentStep >= steps.length) {
-        finishQuest();
-        return;
-    }
-
-    var step = steps[currentStep];
-
-// Восстанавливаем вопрос
-    $('#step-title').text(step.title);
-    $('#step-question').text(step.question);
-    $('input[name="checkpoint_index"]').val(currentStep);
-
-// Проверяем, был ли уже ответ на основной вопрос
-    var saved = answersJson['checkpoint_' + currentStep] || {};
-    var mainAnswered = !!saved.main_answer;
-
-    if (mainAnswered) {
-        $('#answer-input').prop('disabled', true).val(saved.main_answer).addClass('bg-gray-100');
-        $('#submit-button').hide();
-        $('#form-message').addClass('text-green-600').text('✅ Ответ принят ранее: ' + saved.main_answer);
-    } else {
-        $('#answer-input').prop('disabled', false).val('');
-        $('#submit-button').show().prop('disabled', false).text('Отправить ответ');
-    }
-
-// Дополнительные вопросы
-    if (step.additional_questions && step.additional_questions.length) {
-        showExtraQuestions(step.additional_questions);
-    }
-}
-
-
-///
-
-
-function onAnswerResponse(data) {
-    if (data.success) {
-        $('#form-message').removeClass('text-red-600').addClass('text-green-600').text(data.message || '✅ Ответ принят!');
-        $('#answer-input').prop('disabled', true).val('✅ Ответ принят');
-        $('#submit-button').hide();
-        correctMainAnswer = true;
-
-// Переход к следующему шагу или дополнительные вопросы
-        if (hasExtraQuestion) {
-            showExtraQuestions();
+        if (dist <= checkpointRadius) {
+            form.classList.remove('hidden');
+            message.textContent = "✅ Вы на месте! Можете отвечать.";
+            message.className = "text-green-600 mt-4";
         } else {
-            setTimeout(function() {
-                reloadData();
-            }, 800);
+            form.classList.add('hidden');
+            message.textContent = `🚗 До точки: ${Math.round(dist)} м`;
+            message.className = "text-gray-600 mt-4";
         }
-    } else {
-        $('#form-message').removeClass('text-green-600').addClass('text-red-600').text('❌ ' + (data.error || 'Ошибка'));
-        $('#submit-button').prop('disabled', false).text('Отправить ответ');
     }
-}
 
-
-///
-
-
-function finishQuest() {
-    $('#quest-finish').fadeIn();
-}
-
-
-
-///
-
-
-function showExtraQuestions() {
-    if (!extraQuestions.length) return;
-    $('#extra-questions-list').empty();
-
-    extraQuestions.forEach(function(extra, index) {
-        var header = extra.title || extra.question || 'Доп. вопрос';
-        var $form = $('<form>', { class: 'extra-answer-form mb-6' }).append(
-            $('<input>', { type: 'text', name: 'answer', placeholder: header }),
-            $('<button>', { type: 'submit', text: 'Ответить' })
+    if ('geolocation' in navigator) {
+        navigator.geolocation.watchPosition(
+            pos => {
+                userLat = pos.coords.latitude;
+                userLng = pos.coords.longitude;
+                checkDistance();
+            },
+            err => {
+                const message = document.getElementById('geo-message');
+                if (message) message.textContent = '⚠️ Не удалось получить геолокацию';
+            },
+            { enableHighAccuracy: true }
         );
-        $('#extra-questions-list').append($form);
+    } else {
+        const message = document.getElementById('geo-message');
+        if (message) message.textContent = '⚠️ Геолокация не поддерживается';
+    }
+});
 
-        $form.on('submit', function(e) {
-            e.preventDefault();
-            handleExtraAnswerSubmit(this);
-        });
+let  answerForm = document.getElementById('answer-form');
+if (answerForm) {
+    answerForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const message = document.getElementById('answer-message');
+        const formData = new FormData(answerForm);
+
+        message.textContent = '⏳ Проверка...';
+        message.className = 'text-gray-600';
+
+        try {
+            const response = await fetch('submit-answer.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                message.textContent = result.message || '✅ Ответ принят!';
+                message.className = 'text-green-600';
+                answerForm.querySelector('input[name="answer"]').disabled = true;
+                answerForm.querySelector('button').disabled = true;
+
+                // Перезагрузим страницу через 2 секунды
+                setTimeout(() => window.location.reload(), 2000);
+            } else {
+                message.textContent = result.error || '❌ Неверный ответ';
+                message.className = 'text-red-600';
+            }
+        } catch (err) {
+            message.textContent = '❌ Ошибка сервера. Повторите попытку.';
+            message.className = 'text-red-600';
+        }
     });
-
-    $('#extra-questions-container').removeClass('hidden');
 }
+
+
+// Обработка всех форм дополнительных вопросов
+const extraForms = document.querySelectorAll('.extra-answer-form');
+
+extraForms.forEach(form => {
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const btn = form.querySelector('button[type="submit"]');
+        const msg = form.querySelector('.extra-form-message');
+        const formData = new FormData(form);
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Отправка...';
+        msg.textContent = '';
+        msg.className = 'extra-form-message mt-2 text-left text-sm text-gray-600';
+
+        try {
+            const response = await fetch('submit-extra-answer.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                msg.textContent = result.message || '✅ Ответ принят!';
+                msg.classList.replace('text-gray-600', 'text-green-600');
+                form.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
+
+                // Перезагрузка через 2 секунды
+                setTimeout(() => window.location.reload(), 2000);
+            } else {
+                msg.textContent = result.error || '❌ Ошибка';
+                msg.classList.replace('text-gray-600', 'text-red-600');
+                btn.disabled = false;
+                btn.textContent = 'Отправить';
+            }
+        } catch (err) {
+            msg.textContent = '❌ Сервер не отвечает';
+            msg.classList.replace('text-gray-600', 'text-red-600');
+            btn.disabled = false;
+            btn.textContent = 'Отправить';
+        }
+    });
+});
 

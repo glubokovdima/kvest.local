@@ -44,9 +44,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'title' => $c['title'],
                 'question' => $c['question'],
                 'answers' => $c['answers'],
+                'note' => $c['note'] ?? '',
                 'lat' => $c['lat'],
                 'lng' => $c['lng'],
-                'radius' => $c['radius']
+                'radius' => $c['radius'],
+                'additional_questions' => $c['additional_questions'] ?? []
             ];
         }
     }
@@ -80,7 +82,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <h1 class="text-2xl font-bold mb-4"><?= $editing ? '✏️ Редактировать' : '➕ Добавить' ?> квест</h1>
 
     <form method="post">
-        <!-- основные поля квеста -->
         <div class="space-y-4 mb-8">
             <input name="name" placeholder="Название" value="<?= htmlspecialchars($game['name']) ?>" class="w-full p-2 border rounded" required>
             <input name="slug" placeholder="Слаг (URL)" value="<?= htmlspecialchars($game['slug']) ?>" class="w-full p-2 border rounded">
@@ -92,7 +93,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </label>
         </div>
 
-        <!-- шаги -->
         <h2 class="text-lg font-semibold mb-2">📍 Шаги квеста</h2>
         <div id="checkpoints-container">
             <?php foreach ($checkpoints as $i => $cp): ?>
@@ -100,12 +100,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input name="checkpoints[<?= $i ?>][title]" placeholder="Название точки" value="<?= htmlspecialchars($cp['title']) ?>" class="w-full mb-2 p-2 border rounded">
                     <textarea name="checkpoints[<?= $i ?>][question]" placeholder="Вопрос" class="w-full mb-2 p-2 border rounded"><?= htmlspecialchars($cp['question']) ?></textarea>
                     <input name="checkpoints[<?= $i ?>][answers]" placeholder="Ответы (через | )" value="<?= htmlspecialchars($cp['answers']) ?>" class="w-full mb-2 p-2 border rounded">
+                    <input name="checkpoints[<?= $i ?>][note]" placeholder="Подсказка" value="<?= htmlspecialchars($cp['note'] ?? '') ?>" class="w-full mb-2 p-2 border rounded">
                     <div class="flex gap-2 mb-2">
                         <input name="checkpoints[<?= $i ?>][lat]" placeholder="lat" value="<?= htmlspecialchars($cp['lat']) ?>" class="w-full p-2 border rounded">
                         <input name="checkpoints[<?= $i ?>][lng]" placeholder="lng" value="<?= htmlspecialchars($cp['lng']) ?>" class="w-full p-2 border rounded">
                         <input name="checkpoints[<?= $i ?>][radius]" placeholder="радиус" value="<?= htmlspecialchars($cp['radius']) ?>" class="w-full p-2 border rounded">
                     </div>
-                    <button type="button" onclick="this.parentElement.remove()" class="text-red-600 text-sm">Удалить шаг</button>
+
+                    <div class="flex gap-2 mb-2">
+                        <button type="button" onclick="moveUp(this)" class="text-sm text-gray-600 hover:text-black">🔼 Вверх</button>
+                        <button type="button" onclick="moveDown(this)" class="text-sm text-gray-600 hover:text-black">🔽 Вниз</button>
+                    </div>
+
+                    <h4 class="text-sm font-semibold mb-1">Доп. вопросы:</h4>
+                    <div class="extra-questions space-y-3 mb-2">
+                        <?php foreach (($cp['additional_questions'] ?? []) as $j => $extra): ?>
+                            <div class="bg-gray-100 p-2 rounded">
+                                <select name="checkpoints[<?= $i ?>][additional_questions][<?= $j ?>][type]" class="mb-1 p-1 border rounded w-full">
+                                    <option value="text" <?= $extra['type'] === 'text' ? 'selected' : '' ?>>Текст</option>
+                                    <option value="photo" <?= $extra['type'] === 'photo' ? 'selected' : '' ?>>Фото</option>
+                                </select>
+                                <input name="checkpoints[<?= $i ?>][additional_questions][<?= $j ?>][question]" placeholder="Вопрос" value="<?= htmlspecialchars($extra['question'] ?? '') ?>" class="w-full mb-1 p-1 border rounded">
+                                <input name="checkpoints[<?= $i ?>][additional_questions][<?= $j ?>][answer]" placeholder="Ответ (или 'auto')" value="<?= htmlspecialchars($extra['answer'] ?? '') ?>" class="w-full mb-1 p-1 border rounded">
+                                <button type="button" onclick="this.parentElement.remove()" class="text-red-500 text-sm">Удалить</button>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <button type="button" class="text-sm text-blue-600 add-extra">➕ Добавить доп. вопрос</button>
+                    <button type="button" onclick="this.parentElement.remove(); updateCheckpointNames();" class="text-red-600 text-sm mt-2 block">Удалить шаг</button>
                 </div>
             <?php endforeach; ?>
         </div>
@@ -122,24 +144,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <script>
     let checkpointIndex = <?= count($checkpoints) ?>;
 
+    function updateCheckpointNames() {
+        const blocks = document.querySelectorAll('.cp-block');
+        blocks.forEach((block, i) => {
+            block.querySelectorAll('[name]').forEach(el => {
+                el.name = el.name.replace(/checkpoints\[\d+\]/g, `checkpoints[${i}]`);
+            });
+
+            const extras = block.querySelectorAll('.extra-questions > div');
+            extras.forEach((div, j) => {
+                div.querySelectorAll('[name]').forEach(el => {
+                    el.name = el.name.replace(/\[additional_questions\]\[\d+\]/g, `[additional_questions][${j}]`);
+                });
+            });
+        });
+    }
+
+    function moveUp(btn) {
+        const block = btn.closest('.cp-block');
+        const prev = block.previousElementSibling;
+        if (prev) {
+            block.parentNode.insertBefore(block, prev);
+            updateCheckpointNames();
+        }
+    }
+
+    function moveDown(btn) {
+        const block = btn.closest('.cp-block');
+        const next = block.nextElementSibling;
+        if (next) {
+            block.parentNode.insertBefore(next, block.nextSibling);
+            updateCheckpointNames();
+        }
+    }
+
     function addCheckpoint() {
         const container = document.getElementById('checkpoints-container');
         const block = document.createElement('div');
         block.className = 'cp-block';
         block.innerHTML = `
-            <input name="checkpoints[\${checkpointIndex}][title]" placeholder="Название точки" class="w-full mb-2 p-2 border rounded">
-            <textarea name="checkpoints[\${checkpointIndex}][question]" placeholder="Вопрос" class="w-full mb-2 p-2 border rounded"></textarea>
-            <input name="checkpoints[\${checkpointIndex}][answers]" placeholder="Ответы (через | )" class="w-full mb-2 p-2 border rounded">
-            <div class="flex gap-2 mb-2">
-                <input name="checkpoints[\${checkpointIndex}][lat]" placeholder="lat" class="w-full p-2 border rounded">
-                <input name="checkpoints[\${checkpointIndex}][lng]" placeholder="lng" class="w-full p-2 border rounded">
-                <input name="checkpoints[\${checkpointIndex}][radius]" placeholder="радиус" class="w-full p-2 border rounded">
-            </div>
-            <button type="button" onclick="this.parentElement.remove()" class="text-red-600 text-sm">Удалить шаг</button>
-        `;
+        <input name="checkpoints[${checkpointIndex}][title]" placeholder="Название точки" class="w-full mb-2 p-2 border rounded">
+        <textarea name="checkpoints[${checkpointIndex}][question]" placeholder="Вопрос" class="w-full mb-2 p-2 border rounded"></textarea>
+        <input name="checkpoints[${checkpointIndex}][answers]" placeholder="Ответы (через | )" class="w-full mb-2 p-2 border rounded">
+        <div class="flex gap-2 mb-2">
+            <input name="checkpoints[${checkpointIndex}][lat]" placeholder="lat" class="w-full p-2 border rounded">
+            <input name="checkpoints[${checkpointIndex}][lng]" placeholder="lng" class="w-full p-2 border rounded">
+            <input name="checkpoints[${checkpointIndex}][radius]" placeholder="радиус" class="w-full p-2 border rounded">
+        </div>
+        <div class="flex gap-2 mb-2">
+            <button type="button" onclick="moveUp(this)" class="text-sm text-gray-600 hover:text-black">🔼 Вверх</button>
+            <button type="button" onclick="moveDown(this)" class="text-sm text-gray-600 hover:text-black">🔽 Вниз</button>
+        </div>
+        <h4 class="text-sm font-semibold mb-1">Доп. вопросы:</h4>
+        <div class="extra-questions space-y-3 mb-2"></div>
+        <button type="button" class="text-sm text-blue-600 add-extra">➕ Добавить доп. вопрос</button>
+        <button type="button" onclick="this.parentElement.remove(); updateCheckpointNames();" class="text-red-600 text-sm mt-2 block">Удалить шаг</button>
+    `;
         container.appendChild(block);
         checkpointIndex++;
+        updateCheckpointNames();
     }
+
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('add-extra')) {
+            const wrapper = e.target.previousElementSibling;
+            const parentIndex = Array.from(document.querySelectorAll('.cp-block')).indexOf(e.target.closest('.cp-block'));
+            const index = wrapper.querySelectorAll('div').length;
+
+            const html = `
+        <div class="bg-gray-100 p-2 rounded">
+            <select name="checkpoints[${parentIndex}][additional_questions][${index}][type]" class="mb-1 p-1 border rounded w-full">
+                <option value="text">Текст</option>
+                <option value="photo">Фото</option>
+            </select>
+            <input name="checkpoints[${parentIndex}][additional_questions][${index}][question]" placeholder="Вопрос" class="w-full mb-1 p-1 border rounded">
+            <input name="checkpoints[${parentIndex}][additional_questions][${index}][answer]" placeholder="Ответ (или 'auto')" class="w-full mb-1 p-1 border rounded">
+            <button type="button" onclick="this.parentElement.remove()" class="text-red-500 text-sm">Удалить</button>
+        </div>`;
+            wrapper.insertAdjacentHTML('beforeend', html);
+        }
+    });
 </script>
 </body>
 </html>
