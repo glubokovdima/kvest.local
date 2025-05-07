@@ -1,19 +1,34 @@
 <?php
 require_once __DIR__ . '/../db/db.php';
 
-// Загружаем команды с их играми
+// 📤 Сохранение редактированного прогресса
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['team_id'], $_POST['game_id'], $_POST['progress'])) {
+    $teamId = (int)$_POST['team_id'];
+    $gameId = (int)$_POST['game_id'];
+    $progressJson = json_encode(json_decode($_POST['progress'], true), JSON_UNESCAPED_UNICODE);
+
+    $stmt = $db->prepare("UPDATE team_progress SET progress = ? WHERE team_id = ? AND game_id = ?");
+    $stmt->execute([$progressJson, $teamId, $gameId]);
+
+    header("Location: ".$_SERVER['REQUEST_URI']);
+    exit;
+}
+
+// 📥 Загрузка данных
 $teams = $db->query("SELECT * FROM teams ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
-
-// Загружаем все team_games
 $teamGames = $db->query("SELECT * FROM team_games")->fetchAll(PDO::FETCH_ASSOC);
-
-// Сопоставим игры
 $games = $db->query("SELECT id, name FROM games")->fetchAll(PDO::FETCH_KEY_PAIR);
+$progressRaw = $db->query("SELECT * FROM team_progress")->fetchAll(PDO::FETCH_ASSOC);
 
-// Привязка team_games к командам
+// Сопоставления
 $teamGameMap = [];
 foreach ($teamGames as $tg) {
     $teamGameMap[$tg['team_id']][] = $tg;
+}
+
+$progressMap = [];
+foreach ($progressRaw as $p) {
+    $progressMap[$p['team_id']][$p['game_id']] = $p['progress'];
 }
 ?>
 <!DOCTYPE html>
@@ -41,17 +56,29 @@ foreach ($teamGames as $tg) {
                     <h3 class="font-semibold text-sm text-gray-700 mb-1">Участия:</h3>
                     <ul class="list-disc pl-6 text-sm text-gray-800">
                         <?php foreach ($teamGameMap[$team['id']] as $g): ?>
-                            <li>
+                            <li class="mb-3">
                                 <span class="font-medium"><?= htmlspecialchars($games[$g['game_id']] ?? '—') ?></span>
                                 (<?= $g['status'] ?><?= $g['is_paid'] ? ', оплачено' : '' ?>)
 
-                                <?php if ($g['answers']): ?>
-                                    <details class="ml-2 inline-block">
-                                        <summary class="cursor-pointer text-blue-600">Ответы</summary>
-                                        <div class="mt-1 bg-gray-50 p-2 rounded text-xs text-gray-700 whitespace-pre-wrap">
-                                            <?= nl2br(htmlspecialchars(json_encode(json_decode($g['answers'], true), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))) ?>
-                                        </div>
+                                <?php
+                                $progressJson = $progressMap[$team['id']][$g['game_id']] ?? null;
+                                if ($progressJson):
+                                    $decoded = json_decode($progressJson, true);
+                                    $pretty = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+                                    ?>
+                                    <details class="ml-2 inline-block w-full">
+                                        <summary class="cursor-pointer text-blue-600">Ответы (редактировать)</summary>
+                                        <form method="POST" class="mt-1 bg-gray-50 p-2 rounded text-xs text-gray-700">
+                                            <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
+                                            <input type="hidden" name="game_id" value="<?= $g['game_id'] ?>">
+                                            <textarea name="progress" rows="10" class="w-full border p-1 rounded bg-white"><?= htmlspecialchars($pretty) ?></textarea>
+                                            <div class="mt-2 text-right">
+                                                <button type="submit" class="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">💾 Сохранить</button>
+                                            </div>
+                                        </form>
                                     </details>
+                                <?php else: ?>
+                                    <p class="text-gray-500 text-xs ml-2">Ответов пока нет</p>
                                 <?php endif; ?>
                             </li>
                         <?php endforeach; ?>

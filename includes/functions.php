@@ -21,17 +21,24 @@ function getProgress(PDO $db, int $teamId, int $gameId): array {
 
 function saveProgress(PDO $db, int $teamId, int $gameId, array $progress) {
     $json = json_encode($progress, JSON_UNESCAPED_UNICODE);
+
+    // 🟡 Безопасно получаем location_id (может быть 0 или шаг)
+    $locationId = $progress['location_id'] ?? 0;
+
+    // Проверяем, есть ли уже запись
     $stmt = $db->prepare("SELECT id FROM team_progress WHERE team_id = ? AND game_id = ?");
     $stmt->execute([$teamId, $gameId]);
 
     if ($stmt->fetchColumn()) {
-        $stmt = $db->prepare("UPDATE team_progress SET progress = ? WHERE team_id = ? AND game_id = ?");
-        $stmt->execute([$json, $teamId, $gameId]);
+        $stmt = $db->prepare("UPDATE team_progress SET progress = ?, location_id = ? WHERE team_id = ? AND game_id = ?");
+        $stmt->execute([$json, $locationId, $teamId, $gameId]);
     } else {
-        $stmt = $db->prepare("INSERT INTO team_progress (team_id, game_id, progress) VALUES (?, ?, ?)");
-        $stmt->execute([$teamId, $gameId, $json]);
+        $stmt = $db->prepare("INSERT INTO team_progress (team_id, game_id, location_id, progress) VALUES (?, ?, ?, ?)");
+        $stmt->execute([$teamId, $gameId, $locationId, $json]);
     }
 }
+
+
 
 function handleAnswer(PDO $db, int $teamId, array $post, array $files = []): array {
     $gameId = (int)($post['game_id'] ?? 0);
@@ -58,6 +65,11 @@ function handleAnswer(PDO $db, int $teamId, array $post, array $files = []): arr
 
     if (!isset($progress[$checkpointKey])) $progress[$checkpointKey] = [];
 
+    // 🆕 Добавим location_id, если у шага есть id
+    if (isset($step['id'])) {
+        $progress['location_id'] = $step['id'];
+    }
+
     // ✅ Основной ответ
     if ($extraIndex === null) {
         $variants = array_map('mb_strtolower', array_map('trim', explode('|', $step['answers'] ?? '')));
@@ -68,7 +80,7 @@ function handleAnswer(PDO $db, int $teamId, array $post, array $files = []): arr
 
         $progress[$checkpointKey]['main_answer'] = $answer;
         $progress[$checkpointKey]['answer_time'] = $now;
-
+        $progress['location_id'] = $checkpointIndex;
         saveProgress($db, $teamId, $gameId, $progress);
         return ['success' => true, 'message' => '✅ Ответ принят'];
     }
@@ -81,25 +93,37 @@ function handleAnswer(PDO $db, int $teamId, array $post, array $files = []): arr
         $progress[$checkpointKey]['extra_answers'] = [];
     }
 
-    // 📸 Фото + AUTO
+// 📸 Фото + AUTO
     if ($extra['type'] === 'photo' && ($extra['answer'] ?? '') === 'auto') {
         if (!isset($files['answer']) || $files['answer']['error'] !== UPLOAD_ERR_OK) {
             return ['success' => false, 'error' => 'Файл не загружен'];
         }
 
         $ext = pathinfo($files['answer']['name'], PATHINFO_EXTENSION);
-        $name = uniqid('photo_') . '.' . strtolower($ext);
-        move_uploaded_file($files['answer']['tmp_name'], __DIR__ . '/../uploads/' . $name);
+        $base = pathinfo($files['answer']['name'], PATHINFO_FILENAME);
+        $uploadDir = __DIR__ . '/../uploads/';
+        $filename = $base . '.' . strtolower($ext);
+        $i = 1;
+
+        while (file_exists($uploadDir . $filename)) {
+            $filename = $base . '-' . $i . '.' . strtolower($ext);
+            $i++;
+        }
+
+        move_uploaded_file($files['answer']['tmp_name'], $uploadDir . $filename);
 
         $progress[$checkpointKey]['extra_answers'][$extraIndex] = [
             'answer' => 'Фото загружено',
             'answer_time' => $now,
-            'filename' => $name
+            'filename' => $filename
         ];
 
         saveProgress($db, $teamId, $gameId, $progress);
         return ['success' => true, 'message' => '✅ Фото принято'];
     }
+
+
+
 
     // 📝 Текст
     $expected = trim($extra['answer'] ?? '');
@@ -113,7 +137,7 @@ function handleAnswer(PDO $db, int $teamId, array $post, array $files = []): arr
         'answer' => $given,
         'answer_time' => $now
     ];
-
+    $progress['location_id'] = $checkpointIndex;
     saveProgress($db, $teamId, $gameId, $progress);
     return ['success' => true, 'message' => '✅ Ответ принят'];
 }

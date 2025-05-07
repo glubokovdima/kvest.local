@@ -11,7 +11,6 @@
         <div class="space-y-4">
             <a href="games.php" class="block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">🗺️ Редактировать квесты</a>
             <a href="teams.php" class="block px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">👥 Просмотр команд</a>
-            <a href="play.php" class="block px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700">▶️ Прохождение квеста (демо)</a>
         </div>
     </div>
 </body>
